@@ -1,0 +1,8 @@
+gradio
+ultralytics
+transformers
+torch
+torchvision
+pillow
+sentencepiece
+accelerate
