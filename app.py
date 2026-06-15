@@ -1,21 +1,15 @@
 import streamlit as st
-from ultralytics import YOLO
+from PIL import Image
 from transformers import (
     BlipProcessor,
     BlipForConditionalGeneration,
     BlipForQuestionAnswering
 )
-from PIL import Image
 
-st.set_page_config(
-    page_title="Image Understanding System",
-    layout="centered"
-)
+st.set_page_config(page_title="Image Assistant")
 
 @st.cache_resource
 def load_models():
-
-    detector = YOLO("yolov8n.pt")
 
     caption_processor = BlipProcessor.from_pretrained(
         "Salesforce/blip-image-captioning-base"
@@ -34,7 +28,6 @@ def load_models():
     )
 
     return (
-        detector,
         caption_processor,
         caption_model,
         vqa_processor,
@@ -43,7 +36,6 @@ def load_models():
 
 
 (
-    detector,
     caption_processor,
     caption_model,
     vqa_processor,
@@ -51,62 +43,44 @@ def load_models():
 ) = load_models()
 
 
-def analyze(image, question):
+def generate_caption(image):
 
-    detection_results = detector(image)
-
-    labels = set()
-
-    for box in detection_results[0].boxes:
-        labels.add(
-            detector.names[int(box.cls)]
-        )
-
-    objects_found = (
-        ", ".join(sorted(labels))
-        if labels
-        else "No objects detected"
-    )
-
-    caption_inputs = caption_processor(
+    inputs = caption_processor(
         image,
         return_tensors="pt"
     )
 
-    caption_ids = caption_model.generate(
-        **caption_inputs,
+    output = caption_model.generate(
+        **inputs,
         max_new_tokens=30
     )
 
-    caption = caption_processor.decode(
-        caption_ids[0],
+    return caption_processor.decode(
+        output[0],
         skip_special_tokens=True
     )
 
-    answer = "No question provided"
 
-    if question.strip():
+def answer_question(image, question):
 
-        qa_inputs = vqa_processor(
-            image,
-            question,
-            return_tensors="pt"
-        )
+    inputs = vqa_processor(
+        image,
+        question,
+        return_tensors="pt"
+    )
 
-        answer_ids = vqa_model.generate(
-            **qa_inputs,
-            max_new_tokens=10
-        )
+    output = vqa_model.generate(
+        **inputs,
+        max_new_tokens=10
+    )
 
-        answer = vqa_processor.decode(
-            answer_ids[0],
-            skip_special_tokens=True
-        )
-
-    return objects_found, caption, answer
+    return vqa_processor.decode(
+        output[0],
+        skip_special_tokens=True
+    )
 
 
-st.title("Image Understanding System")
+st.title("Visual AI Assistant")
 
 uploaded_file = st.file_uploader(
     "Upload an Image",
@@ -114,31 +88,28 @@ uploaded_file = st.file_uploader(
 )
 
 question = st.text_input(
-    "Ask a Question (Optional)"
+    "Ask a question about the image"
 )
 
 if uploaded_file:
 
     image = Image.open(uploaded_file).convert("RGB")
 
-    st.image(
-        image,
-        caption="Uploaded Image",
-        use_container_width=True
-    )
+    st.image(image, use_container_width=True)
 
     if st.button("Analyze"):
 
-        objects, caption, answer = analyze(
-            image,
-            question
-        )
+        caption = generate_caption(image)
 
-        st.subheader("Detected Objects")
-        st.write(objects)
-
-        st.subheader("Generated Caption")
+        st.subheader("Image Description")
         st.write(caption)
 
-        st.subheader("Answer")
-        st.write(answer)
+        if question.strip():
+
+            answer = answer_question(
+                image,
+                question
+            )
+
+            st.subheader("Answer")
+            st.write(answer)
