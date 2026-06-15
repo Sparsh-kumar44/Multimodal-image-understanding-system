@@ -1,67 +1,72 @@
-import gradio as gr
+import streamlit as st
 from ultralytics import YOLO
 from transformers import (
     BlipProcessor,
     BlipForConditionalGeneration,
     BlipForQuestionAnswering
 )
+from PIL import Image
 
-print("Loading models...")
-
-yolo_model = YOLO("yolov8n.pt")
-
-caption_processor = BlipProcessor.from_pretrained(
-    "Salesforce/blip-image-captioning-base"
+st.set_page_config(
+    page_title="Image Understanding System",
+    layout="centered"
 )
 
-caption_model = BlipForConditionalGeneration.from_pretrained(
-    "Salesforce/blip-image-captioning-base"
-)
+@st.cache_resource
+def load_models():
 
-vqa_processor = BlipProcessor.from_pretrained(
-    "Salesforce/blip-vqa-base"
-)
+    detector = YOLO("yolov8n.pt")
 
-vqa_model = BlipForQuestionAnswering.from_pretrained(
-    "Salesforce/blip-vqa-base"
-)
+    caption_processor = BlipProcessor.from_pretrained(
+        "Salesforce/blip-image-captioning-base"
+    )
 
-print("Models Loaded!")
+    caption_model = BlipForConditionalGeneration.from_pretrained(
+        "Salesforce/blip-image-captioning-base"
+    )
 
-metrics_text = """
-Dataset : COCO128
+    vqa_processor = BlipProcessor.from_pretrained(
+        "Salesforce/blip-vqa-base"
+    )
 
-Precision : 63.85 %
+    vqa_model = BlipForQuestionAnswering.from_pretrained(
+        "Salesforce/blip-vqa-base"
+    )
 
-Recall : 53.61 %
+    return (
+        detector,
+        caption_processor,
+        caption_model,
+        vqa_processor,
+        vqa_model
+    )
 
-mAP@50 : 60.54 %
 
-mAP@50-95 : 44.54 %
-"""
+(
+    detector,
+    caption_processor,
+    caption_model,
+    vqa_processor,
+    vqa_model
+) = load_models()
 
 
-def analyze_image(image, question):
+def analyze(image, question):
 
-    if image is None:
-        return "", "", ""
+    detection_results = detector(image)
 
-    results = yolo_model(image)
+    labels = set()
 
-    detected_objects = []
-
-    for box in results[0].boxes:
-        cls_id = int(box.cls)
-        detected_objects.append(
-            yolo_model.names[cls_id]
+    for box in detection_results[0].boxes:
+        labels.add(
+            detector.names[int(box.cls)]
         )
 
-    detected_objects = list(set(detected_objects))
-
-    if len(detected_objects) == 0:
-        detected_text = "No objects detected"
-    else:
-        detected_text = ", ".join(detected_objects)
+    objects_found = (
+        ", ".join(sorted(labels))
+        if labels
+        else "No objects detected"
+    )
 
     caption_inputs = caption_processor(
         image,
@@ -78,18 +83,18 @@ def analyze_image(image, question):
         skip_special_tokens=True
     )
 
-    answer = ""
+    answer = "No question provided"
 
-    if question and question.strip():
+    if question.strip():
 
-        vqa_inputs = vqa_processor(
+        qa_inputs = vqa_processor(
             image,
             question,
             return_tensors="pt"
         )
 
         answer_ids = vqa_model.generate(
-            **vqa_inputs,
+            **qa_inputs,
             max_new_tokens=10
         )
 
@@ -98,80 +103,42 @@ def analyze_image(image, question):
             skip_special_tokens=True
         )
 
-    return detected_text, caption, answer
+    return objects_found, caption, answer
 
 
-with gr.Blocks(
-    title="Vision-Language Model for Image Understanding"
-) as demo:
+st.title("Image Understanding System")
 
-    gr.Markdown(
-        """
-# Vision-Language Model for Image Understanding
+uploaded_file = st.file_uploader(
+    "Upload an Image",
+    type=["jpg", "jpeg", "png"]
+)
 
-### YOLOv8 + BLIP + BLIP-VQA
+question = st.text_input(
+    "Ask a Question (Optional)"
+)
 
-This project combines object detection,
-image captioning, and visual question answering
-within a single multimodal AI application.
-"""
+if uploaded_file:
+
+    image = Image.open(uploaded_file).convert("RGB")
+
+    st.image(
+        image,
+        caption="Uploaded Image",
+        use_container_width=True
     )
 
-    with gr.Tab("Image Analysis"):
+    if st.button("Analyze"):
 
-        image_input = gr.Image(
-            type="pil",
-            label="Upload Image"
+        objects, caption, answer = analyze(
+            image,
+            question
         )
 
-        question_input = gr.Textbox(
-            label="Ask a Question",
-            placeholder="What animal is shown in the image?"
-        )
+        st.subheader("Detected Objects")
+        st.write(objects)
 
-        analyze_btn = gr.Button(
-            "Analyze Image"
-        )
+        st.subheader("Generated Caption")
+        st.write(caption)
 
-        clear_btn = gr.ClearButton(
-            [
-                image_input,
-                question_input
-            ]
-        )
-
-        objects_output = gr.Textbox(
-            label="Detected Objects"
-        )
-
-        caption_output = gr.Textbox(
-            label="Generated Caption"
-        )
-
-        answer_output = gr.Textbox(
-            label="Answer"
-        )
-
-        analyze_btn.click(
-            fn=analyze_image,
-            inputs=[
-                image_input,
-                question_input
-            ],
-            outputs=[
-                objects_output,
-                caption_output,
-                answer_output
-            ]
-        )
-
-    with gr.Tab("Performance Evaluation"):
-
-        gr.Textbox(
-            value=metrics_text,
-            lines=10,
-            label="YOLO Evaluation Results",
-            interactive=False
-        )
-
-demo.launch()
+        st.subheader("Answer")
+        st.write(answer)
